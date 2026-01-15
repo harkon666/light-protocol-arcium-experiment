@@ -1,0 +1,23 @@
+[package]
+name = "zkcompress"
+version = "0.1.0"
+description = "Created with Anchor"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "zkcompress"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+
+
+[dependencies]
+anchor-lang = "0.31.1"
+light-sdk = { version = "0.17.1", features = ["v2", "anchor"] }
+light-sdk-types = { version = "0.17.1", features = ["v2", "anchor"] }
