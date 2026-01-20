@@ -1,0 +1,6 @@
+[package]
+name = "battleship"
+type = "bin"
+authors = [""]
+
+[dependencies]

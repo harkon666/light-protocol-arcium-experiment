@@ -47,6 +47,7 @@ pub mod battleship {
         ship_start_x: u8,
         ship_start_y: u8,
         is_horizontal: bool,
+        board_hash: [u8; 32],
     ) -> Result<()> {
         // Validate ship placement
         if ship_start_x >= GRID_SIZE as u8 || ship_start_y >= GRID_SIZE as u8 {
@@ -123,12 +124,12 @@ pub mod battleship {
 
         // Init Player A
         game_account.grid_a = grid;
-        game_account.ships_a = ship_cells;
+        game_account.board_hash_a = board_hash;
         game_account.hits_a = 0;
 
         // Init Player B (Empty)
         game_account.grid_b = [CELL_EMPTY; GRID_CELLS];
-        game_account.ships_b = [0u8; SHIP_LENGTH];
+        game_account.board_hash_b = [0u8; 32];
         game_account.hits_b = 0;
 
         LightSystemProgramCpi::new_cpi(LIGHT_CPI_SIGNER, proof)
@@ -152,6 +153,7 @@ pub mod battleship {
         ship_start_x: u8,
         ship_start_y: u8,
         is_horizontal: bool,
+        board_hash: [u8; 32],
     ) -> Result<()> {
         // Validate game status
         if current_game.game_status != 0 {
@@ -208,7 +210,7 @@ pub mod battleship {
         }
 
         game_account.grid_b = grid;
-        game_account.ships_b = ship_cells;
+        game_account.board_hash_b = board_hash;
         game_account.hits_b = 0;
 
         msg!(
@@ -344,12 +346,12 @@ pub struct GameState {
 
     // Player A
     pub grid_a: [u8; GRID_CELLS],
-    pub ships_a: [u8; SHIP_LENGTH],
+    pub board_hash_a: [u8; 32], // Noir Pedersen Hash (bytes)
     pub hits_a: u8,
 
     // Player B
     pub grid_b: [u8; GRID_CELLS],
-    pub ships_b: [u8; SHIP_LENGTH],
+    pub board_hash_b: [u8; 32], // Noir Pedersen Hash (bytes)
     pub hits_b: u8,
 }
 
