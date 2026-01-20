@@ -39,28 +39,34 @@ const CELL_SHIP = 1;
 const CELL_HIT = 2;
 const CELL_MISS = 3;
 
-describe("battleship", () => {
+describe("battleship_1v1", () => {
   const program = anchor.workspace.Battleship as Program<Battleship>;
   const coder = new anchor.BorshCoder(idl as anchor.Idl);
 
-  // Shared state across tests
-  let signer: web3.Keypair;
+  // Shared state
+  let signerA: web3.Keypair;
+  let signerB: web3.Keypair;
   let rpc: Rpc;
   let outputStateTree: web3.PublicKey;
   let addressTree: web3.PublicKey;
   let gameAddress: web3.PublicKey;
 
-  const GAME_ID = Date.now(); // Unique game ID
+  const GAME_ID = Date.now();
 
   before(async () => {
-    signer = new web3.Keypair();
+    signerA = new web3.Keypair();
+    signerB = new web3.Keypair();
+
     rpc = createRpc(
       "http://127.0.0.1:8899",
       "http://127.0.0.1:8784",
       "http://127.0.0.1:3001",
       { commitment: "confirmed" }
     );
-    await rpc.requestAirdrop(signer.publicKey, web3.LAMPORTS_PER_SOL * 2);
+
+    // Airdrop to both players
+    await rpc.requestAirdrop(signerA.publicKey, web3.LAMPORTS_PER_SOL * 2);
+    await rpc.requestAirdrop(signerB.publicKey, web3.LAMPORTS_PER_SOL * 2);
     await sleep(2000);
 
     outputStateTree = defaultTestStateTreeAccounts().merkleTree;
@@ -76,10 +82,27 @@ describe("battleship", () => {
     console.log("Game Address:", gameAddress.toBase58());
   });
 
-  // ===============================
-  // TEST 1: Create Game with Ship
-  // ===============================
-  it("1. create game with ship placed horizontally at (0,0)", async () => {
+  // Helper to decode GameState
+  const decodeGameState = (data: Buffer) => {
+    const decoded = coder.types.decode("GameState", data);
+    return {
+      gameId: decoded.game_id,
+      playerA: decoded.player_a,
+      playerB: decoded.player_b,
+      currentTurn: decoded.current_turn,
+      gameStatus: decoded.game_status,
+      // Player A
+      gridA: decoded.grid_a,
+      shipsA: decoded.ships_a,
+      hitsA: decoded.hits_a,
+      // Player B
+      gridB: decoded.grid_b,
+      shipsB: decoded.ships_b,
+      hitsB: decoded.hits_b,
+    };
+  };
+
+  it("1. Player A Creates Game", async () => {
     const shipStartX = 0;
     const shipStartY = 0;
     const isHorizontal = true;
@@ -102,7 +125,8 @@ describe("battleship", () => {
     const outputStateTreeIndex = remainingAccounts.insertOrGet(outputStateTree);
     const proof = { 0: proofRpcResult.compressedProof };
 
-    const computeBudgetIx = web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 1000000 });
+    const computeBudgetIx = web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 });
+
     const tx = await program.methods
       .createGame(
         proof,
@@ -113,68 +137,42 @@ describe("battleship", () => {
         shipStartY,
         isHorizontal
       )
-      .accounts({ signer: signer.publicKey })
+      .accounts({ signer: signerA.publicKey })
       .preInstructions([computeBudgetIx])
       .remainingAccounts(remainingAccounts.toAccountMetas().remainingAccounts)
-      .signers([signer])
+      .signers([signerA])
       .transaction();
 
     tx.recentBlockhash = (await rpc.getRecentBlockhash()).blockhash;
-    tx.sign(signer);
-    const sig = await rpc.sendTransaction(tx, [signer]);
+    tx.sign(signerA);
+    const sig = await rpc.sendTransaction(tx, [signerA]);
     await confirmTx(rpc, sig);
     console.log("Create Game TX:", sig);
 
-    // Wait for indexer
-    const slot = await rpc.getSlot();
-    await rpc.confirmTransactionIndexed(slot);
+    await rpc.confirmTransactionIndexed(await rpc.getSlot());
 
-    // Verify game state
-    const compressedAccount = await rpc.getCompressedAccount(bn(gameAddress.toBytes()));
-    const decoded = coder.types.decode("GameState", compressedAccount!.data!.data);
+    // Verify State
+    const account = await rpc.getCompressedAccount(bn(gameAddress.toBytes()));
+    const state = decodeGameState(account!.data!.data);
 
-    console.log("Decoded GameState:", decoded);
-
-    assert.strictEqual(decoded.game_id.toNumber(), GAME_ID, "Game ID should match");
-    assert.strictEqual(decoded.hits, 0, "Hits should be 0");
-    assert.strictEqual(decoded.attacks_made, 0, "Attacks made should be 0");
-    assert.strictEqual(decoded.is_game_over, false, "Game should not be over");
-
-    // Verify ship placement at indices 0, 1, 2, 3 (horizontal from 0,0)
-    assert.deepStrictEqual(
-      Array.from(decoded.ship_cells),
-      [0, 1, 2, 3],
-      "Ship should be at cells 0, 1, 2, 3"
-    );
-
-    console.log("✅ Game created with ship at (0,0)-(3,0) horizontally");
+    assert.strictEqual(state.gameId.toNumber(), GAME_ID);
+    assert.ok(state.playerA.equals(signerA.publicKey));
+    assert.strictEqual(state.currentTurn, 1);
+    assert.strictEqual(state.gameStatus, 0); // Waiting
+    console.log("✅ Game Created. Waiting for B.");
   });
 
-  // ===============================
-  // TEST 2: Attack and HIT
-  // ===============================
-  it("2. attack (0,0) - should be HIT", async () => {
-    const attackX = 0;
-    const attackY = 0;
+  it("2. Player B Joins Game", async () => {
+    // Player B places ship vertically at (4,0)
+    const shipStartX = 4;
+    const shipStartY = 0;
+    const isHorizontal = false; // Vertical at right edge
 
-    // Fetch current game state
-    const compressedAccount = await rpc.getCompressedAccount(bn(gameAddress.toBytes()));
-    const currentGame = coder.types.decode("GameState", compressedAccount!.data!.data);
-    const currentGameArg = {
-      gameId: currentGame.game_id,
-      grid: currentGame.grid,
-      shipCells: currentGame.ship_cells,
-      hits: currentGame.hits,
-      attacksMade: currentGame.attacks_made,
-      isGameOver: currentGame.is_game_over,
-    };
+    const account = await rpc.getCompressedAccount(bn(gameAddress.toBytes()));
+    const state = decodeGameState(account!.data!.data);
 
     const proofRpcResult = await rpc.getValidityProofV0(
-      [{
-        hash: compressedAccount!.hash,
-        tree: compressedAccount!.treeInfo.tree,
-        queue: compressedAccount!.treeInfo.queue
-      }],
+      [{ hash: account!.hash, tree: account!.treeInfo.tree, queue: account!.treeInfo.queue }],
       []
     );
 
@@ -182,8 +180,8 @@ describe("battleship", () => {
     const remainingAccounts = new PackedAccounts();
     remainingAccounts.addSystemAccountsV2(systemAccountConfig);
 
-    const merkleTreeIndex = remainingAccounts.insertOrGet(compressedAccount!.treeInfo.tree);
-    const queueIndex = remainingAccounts.insertOrGet(compressedAccount!.treeInfo.queue);
+    const merkleTreeIndex = remainingAccounts.insertOrGet(account!.treeInfo.tree);
+    const queueIndex = remainingAccounts.insertOrGet(account!.treeInfo.queue);
     const outputStateTreeIndex = remainingAccounts.insertOrGet(outputStateTree);
 
     const accountMeta = {
@@ -192,79 +190,123 @@ describe("battleship", () => {
         proveByIndex: false,
         merkleTreePubkeyIndex: merkleTreeIndex,
         queuePubkeyIndex: queueIndex,
-        leafIndex: compressedAccount!.leafIndex,
+        leafIndex: account!.leafIndex,
       },
       address: Array.from(gameAddress.toBytes()),
       outputStateTreeIndex,
     };
 
-    const proof = { 0: proofRpcResult.compressedProof };
-    const computeBudgetIx = web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 1000000 });
-
     const tx = await program.methods
-      .attack(proof, currentGameArg, accountMeta, attackX, attackY)
-      .accounts({ signer: signer.publicKey })
-      .preInstructions([computeBudgetIx])
+      .joinGame(
+        { 0: proofRpcResult.compressedProof },
+        state,
+        accountMeta,
+        shipStartX,
+        shipStartY,
+        isHorizontal
+      )
+      .accounts({ signer: signerB.publicKey })
       .remainingAccounts(remainingAccounts.toAccountMetas().remainingAccounts)
-      .signers([signer])
+      .signers([signerB])
       .transaction();
 
     tx.recentBlockhash = (await rpc.getRecentBlockhash()).blockhash;
-    tx.sign(signer);
-    const sig = await rpc.sendTransaction(tx, [signer]);
+    tx.sign(signerB);
+    const sig = await rpc.sendTransaction(tx, [signerB]);
     await confirmTx(rpc, sig);
-    console.log("Attack (0,0) TX:", sig);
+    console.log("Join Game TX:", sig);
 
-    // Wait for indexer
-    const slot = await rpc.getSlot();
-    await rpc.confirmTransactionIndexed(slot);
+    await rpc.confirmTransactionIndexed(await rpc.getSlot());
 
-    // Verify game state
+    // Verify State
     const updatedAccount = await rpc.getCompressedAccount(bn(gameAddress.toBytes()));
-    const decoded = coder.types.decode("GameState", updatedAccount!.data!.data);
+    const newState = decodeGameState(updatedAccount!.data!.data);
 
-    assert.strictEqual(decoded.hits, 1, "Hits should be 1");
-    assert.strictEqual(decoded.attacks_made, 1, "Attacks made should be 1");
-    assert.strictEqual(decoded.grid[0], CELL_HIT, "Cell (0,0) should be HIT");
-    assert.strictEqual(decoded.is_game_over, false, "Game should not be over yet");
-
-    console.log("✅ Attack (0,0) - HIT! Hits: 1/4");
+    assert.ok(newState.playerB.equals(signerB.publicKey));
+    assert.strictEqual(newState.gameStatus, 1); // Active
+    console.log("✅ Player B Joined. Game Active.");
   });
 
-  // ===============================
-  // TEST 3: Attack and MISS
-  // ===============================
-  it("3. attack (4,4) - should be MISS", async () => {
+  it("3. Player A Attacks B (Hit)", async () => {
+    // A attacks (4,0) -> Should hit B's ship
+    const attackX = 4;
+    const attackY = 0;
+
+    const account = await rpc.getCompressedAccount(bn(gameAddress.toBytes()));
+    const state = decodeGameState(account!.data!.data);
+
+    const proofRpcResult = await rpc.getValidityProofV0(
+      [{ hash: account!.hash, tree: account!.treeInfo.tree, queue: account!.treeInfo.queue }],
+      []
+    );
+
+    const systemAccountConfig = new SystemAccountMetaConfig(program.programId);
+    const remainingAccounts = new PackedAccounts();
+    remainingAccounts.addSystemAccountsV2(systemAccountConfig);
+    const merkleTreeIndex = remainingAccounts.insertOrGet(account!.treeInfo.tree);
+    const queueIndex = remainingAccounts.insertOrGet(account!.treeInfo.queue);
+    const outputStateTreeIndex = remainingAccounts.insertOrGet(outputStateTree);
+
+    const accountMeta = {
+      treeInfo: {
+        rootIndex: proofRpcResult.rootIndices[0],
+        proveByIndex: false,
+        merkleTreePubkeyIndex: merkleTreeIndex,
+        queuePubkeyIndex: queueIndex,
+        leafIndex: account!.leafIndex,
+      },
+      address: Array.from(gameAddress.toBytes()),
+      outputStateTreeIndex,
+    };
+
+    const tx = await program.methods
+      .attack(
+        { 0: proofRpcResult.compressedProof },
+        state,
+        accountMeta,
+        attackX,
+        attackY
+      )
+      .accounts({ signer: signerA.publicKey })
+      .remainingAccounts(remainingAccounts.toAccountMetas().remainingAccounts)
+      .signers([signerA])
+      .transaction();
+
+    tx.recentBlockhash = (await rpc.getRecentBlockhash()).blockhash;
+    tx.sign(signerA);
+    const sig = await rpc.sendTransaction(tx, [signerA]);
+    await confirmTx(rpc, sig);
+    console.log("Attack (A->B) TX:", sig);
+
+    await rpc.confirmTransactionIndexed(await rpc.getSlot());
+
+    const updatedAccount = await rpc.getCompressedAccount(bn(gameAddress.toBytes()));
+    const newState = decodeGameState(updatedAccount!.data!.data);
+
+    assert.strictEqual(newState.hitsB, 1);
+    assert.strictEqual(newState.gridB[4], CELL_HIT); // (4,0) is index 4
+    assert.strictEqual(newState.currentTurn, 2); // Switched to B
+    console.log("✅ A Hit B. Turn Switched to B.");
+  });
+
+  it("4. Player B Attacks A (Miss)", async () => {
+    // B attacks (4,4) -> Should miss A (A is at 0,0 - 3,0)
     const attackX = 4;
     const attackY = 4;
 
-    // Fetch current game state
-    const compressedAccount = await rpc.getCompressedAccount(bn(gameAddress.toBytes()));
-    const currentGame = coder.types.decode("GameState", compressedAccount!.data!.data);
-    const currentGameArg = {
-      gameId: currentGame.game_id,
-      grid: currentGame.grid,
-      shipCells: currentGame.ship_cells,
-      hits: currentGame.hits,
-      attacksMade: currentGame.attacks_made,
-      isGameOver: currentGame.is_game_over,
-    };
+    const account = await rpc.getCompressedAccount(bn(gameAddress.toBytes()));
+    const state = decodeGameState(account!.data!.data);
 
     const proofRpcResult = await rpc.getValidityProofV0(
-      [{
-        hash: compressedAccount!.hash,
-        tree: compressedAccount!.treeInfo.tree,
-        queue: compressedAccount!.treeInfo.queue
-      }],
+      [{ hash: account!.hash, tree: account!.treeInfo.tree, queue: account!.treeInfo.queue }],
       []
     );
 
     const systemAccountConfig = new SystemAccountMetaConfig(program.programId);
     const remainingAccounts = new PackedAccounts();
     remainingAccounts.addSystemAccountsV2(systemAccountConfig);
-
-    const merkleTreeIndex = remainingAccounts.insertOrGet(compressedAccount!.treeInfo.tree);
-    const queueIndex = remainingAccounts.insertOrGet(compressedAccount!.treeInfo.queue);
+    const merkleTreeIndex = remainingAccounts.insertOrGet(account!.treeInfo.tree);
+    const queueIndex = remainingAccounts.insertOrGet(account!.treeInfo.queue);
     const outputStateTreeIndex = remainingAccounts.insertOrGet(outputStateTree);
 
     const accountMeta = {
@@ -273,132 +315,151 @@ describe("battleship", () => {
         proveByIndex: false,
         merkleTreePubkeyIndex: merkleTreeIndex,
         queuePubkeyIndex: queueIndex,
-        leafIndex: compressedAccount!.leafIndex,
+        leafIndex: account!.leafIndex,
       },
       address: Array.from(gameAddress.toBytes()),
       outputStateTreeIndex,
     };
 
-    const proof = { 0: proofRpcResult.compressedProof };
-    const computeBudgetIx = web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 1000000 });
-
     const tx = await program.methods
-      .attack(proof, currentGameArg, accountMeta, attackX, attackY)
-      .accounts({ signer: signer.publicKey })
-      .preInstructions([computeBudgetIx])
+      .attack(
+        { 0: proofRpcResult.compressedProof },
+        state,
+        accountMeta,
+        attackX,
+        attackY
+      )
+      .accounts({ signer: signerB.publicKey })
       .remainingAccounts(remainingAccounts.toAccountMetas().remainingAccounts)
-      .signers([signer])
+      .signers([signerB])
       .transaction();
 
     tx.recentBlockhash = (await rpc.getRecentBlockhash()).blockhash;
-    tx.sign(signer);
-    const sig = await rpc.sendTransaction(tx, [signer]);
+    tx.sign(signerB);
+    const sig = await rpc.sendTransaction(tx, [signerB]);
     await confirmTx(rpc, sig);
-    console.log("Attack (4,4) TX:", sig);
+    console.log("Attack (B->A) TX:", sig);
 
-    // Wait for indexer
-    const slot = await rpc.getSlot();
-    await rpc.confirmTransactionIndexed(slot);
+    await rpc.confirmTransactionIndexed(await rpc.getSlot());
 
-    // Verify game state
     const updatedAccount = await rpc.getCompressedAccount(bn(gameAddress.toBytes()));
-    const decoded = coder.types.decode("GameState", updatedAccount!.data!.data);
+    const newState = decodeGameState(updatedAccount!.data!.data);
 
-    assert.strictEqual(decoded.hits, 1, "Hits should still be 1");
-    assert.strictEqual(decoded.attacks_made, 2, "Attacks made should be 2");
-    const cellIndex = attackY * GRID_SIZE + attackX; // 4*5+4 = 24
-    assert.strictEqual(decoded.grid[cellIndex], CELL_MISS, "Cell (4,4) should be MISS");
-
-    console.log("✅ Attack (4,4) - MISS! Attacks: 2");
+    assert.strictEqual(newState.gridA[24], CELL_MISS); // (4,4) is index 24
+    assert.strictEqual(newState.currentTurn, 1); // Switched to A
+    console.log("✅ B Missed A. Turn Switched to A.");
   });
 
-  // ===============================
-  // TEST 4: Sink the ship (GAME OVER)
-  // ===============================
-  it("4. attack remaining ship cells - should trigger GAME OVER", async () => {
-    // Attack cells (1,0), (2,0), (3,0) to sink the ship
-    const attackCoords = [[1, 0], [2, 0], [3, 0]];
+  it("5. Player A Sinks B (Game Over)", async () => {
+    // Ships at (4,0), (4,1), (4,2), (4,3)
+    // A already hit (4,0)
+    // Remaining targets: (4,1), (4,2), (4,3)
+    const targets = [[4, 1], [4, 2], [4, 3]];
 
-    for (let i = 0; i < attackCoords.length; i++) {
-      const [attackX, attackY] = attackCoords[i];
+    for (let i = 0; i < targets.length; i++) {
+      const [targetX, targetY] = targets[i];
 
-      // Fetch current game state
-      const compressedAccount = await rpc.getCompressedAccount(bn(gameAddress.toBytes()));
-      const currentGame = coder.types.decode("GameState", compressedAccount!.data!.data);
-      const currentGameArg = {
-        gameId: currentGame.game_id,
-        grid: currentGame.grid,
-        shipCells: currentGame.ship_cells,
-        hits: currentGame.hits,
-        attacksMade: currentGame.attacks_made,
-        isGameOver: currentGame.is_game_over,
-      };
+      // 1. Player A Attacks (Hit)
+      let account = await rpc.getCompressedAccount(bn(gameAddress.toBytes()));
+      let state = decodeGameState(account!.data!.data);
 
-      const proofRpcResult = await rpc.getValidityProofV0(
-        [{
-          hash: compressedAccount!.hash,
-          tree: compressedAccount!.treeInfo.tree,
-          queue: compressedAccount!.treeInfo.queue
-        }],
+      let proofRpcResult = await rpc.getValidityProofV0(
+        [{ hash: account!.hash, tree: account!.treeInfo.tree, queue: account!.treeInfo.queue }],
         []
       );
-
-      const systemAccountConfig = new SystemAccountMetaConfig(program.programId);
-      const remainingAccounts = new PackedAccounts();
+      let systemAccountConfig = new SystemAccountMetaConfig(program.programId);
+      let remainingAccounts = new PackedAccounts();
       remainingAccounts.addSystemAccountsV2(systemAccountConfig);
-
-      const merkleTreeIndex = remainingAccounts.insertOrGet(compressedAccount!.treeInfo.tree);
-      const queueIndex = remainingAccounts.insertOrGet(compressedAccount!.treeInfo.queue);
-      const outputStateTreeIndex = remainingAccounts.insertOrGet(outputStateTree);
-
-      const accountMeta = {
+      let merkleTreeIndex = remainingAccounts.insertOrGet(account!.treeInfo.tree);
+      let queueIndex = remainingAccounts.insertOrGet(account!.treeInfo.queue);
+      let outputStateTreeIndex = remainingAccounts.insertOrGet(outputStateTree);
+      let accountMeta = {
         treeInfo: {
           rootIndex: proofRpcResult.rootIndices[0],
           proveByIndex: false,
           merkleTreePubkeyIndex: merkleTreeIndex,
           queuePubkeyIndex: queueIndex,
-          leafIndex: compressedAccount!.leafIndex,
+          leafIndex: account!.leafIndex,
         },
         address: Array.from(gameAddress.toBytes()),
         outputStateTreeIndex,
       };
 
-      const proof = { 0: proofRpcResult.compressedProof };
-      const computeBudgetIx = web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 1000000 });
-
-      const tx = await program.methods
-        .attack(proof, currentGameArg, accountMeta, attackX, attackY)
-        .accounts({ signer: signer.publicKey })
-        .preInstructions([computeBudgetIx])
+      let tx = await program.methods
+        .attack(
+          { 0: proofRpcResult.compressedProof },
+          state,
+          accountMeta,
+          targetX,
+          targetY
+        )
+        .accounts({ signer: signerA.publicKey })
         .remainingAccounts(remainingAccounts.toAccountMetas().remainingAccounts)
-        .signers([signer])
+        .signers([signerA])
         .transaction();
 
       tx.recentBlockhash = (await rpc.getRecentBlockhash()).blockhash;
-      tx.sign(signer);
-      const sig = await rpc.sendTransaction(tx, [signer]);
+      tx.sign(signerA);
+      let sig = await rpc.sendTransaction(tx, [signerA]);
       await confirmTx(rpc, sig);
-      console.log(`Attack (${attackX},${attackY}) TX:`, sig);
+      await rpc.confirmTransactionIndexed(await rpc.getSlot());
 
-      // Wait for indexer
-      const slot = await rpc.getSlot();
-      await rpc.confirmTransactionIndexed(slot);
+      // If this was the last hit, check Game Over
+      if (i === targets.length - 1) {
+        const finalAccount = await rpc.getCompressedAccount(bn(gameAddress.toBytes()));
+        const finalState = decodeGameState(finalAccount!.data!.data);
+        assert.strictEqual(finalState.gameStatus, 2); // 2 = A Won
+        console.log("🎉 Player A Wins! Game Status = 2");
+        return; // Done
+      }
+
+      // 2. Player B Attacks (Miss) - to give turn back to A
+      const missX = i + 1;
+      const missY = 4;
+
+      account = await rpc.getCompressedAccount(bn(gameAddress.toBytes()));
+      state = decodeGameState(account!.data!.data);
+
+      proofRpcResult = await rpc.getValidityProofV0(
+        [{ hash: account!.hash, tree: account!.treeInfo.tree, queue: account!.treeInfo.queue }],
+        []
+      );
+      systemAccountConfig = new SystemAccountMetaConfig(program.programId);
+      remainingAccounts = new PackedAccounts();
+      remainingAccounts.addSystemAccountsV2(systemAccountConfig);
+      merkleTreeIndex = remainingAccounts.insertOrGet(account!.treeInfo.tree);
+      queueIndex = remainingAccounts.insertOrGet(account!.treeInfo.queue);
+      outputStateTreeIndex = remainingAccounts.insertOrGet(outputStateTree);
+      accountMeta = {
+        treeInfo: {
+          rootIndex: proofRpcResult.rootIndices[0],
+          proveByIndex: false,
+          merkleTreePubkeyIndex: merkleTreeIndex,
+          queuePubkeyIndex: queueIndex,
+          leafIndex: account!.leafIndex,
+        },
+        address: Array.from(gameAddress.toBytes()),
+        outputStateTreeIndex,
+      };
+
+      tx = await program.methods
+        .attack(
+          { 0: proofRpcResult.compressedProof },
+          state,
+          accountMeta,
+          missX,
+          missY
+        )
+        .accounts({ signer: signerB.publicKey })
+        .remainingAccounts(remainingAccounts.toAccountMetas().remainingAccounts)
+        .signers([signerB])
+        .transaction();
+
+      tx.recentBlockhash = (await rpc.getRecentBlockhash()).blockhash;
+      tx.sign(signerB);
+      sig = await rpc.sendTransaction(tx, [signerB]);
+      await confirmTx(rpc, sig);
+      await rpc.confirmTransactionIndexed(await rpc.getSlot());
     }
-
-    // Verify final game state
-    const finalAccount = await rpc.getCompressedAccount(bn(gameAddress.toBytes()));
-    const decoded = coder.types.decode("GameState", finalAccount!.data!.data);
-
-    assert.strictEqual(decoded.hits, 4, "Hits should be 4");
-    assert.strictEqual(decoded.attacks_made, 5, "Attacks made should be 5");
-    assert.strictEqual(decoded.is_game_over, true, "Game should be OVER!");
-
-    // All ship cells should be HIT
-    for (let i = 0; i < SHIP_LENGTH; i++) {
-      assert.strictEqual(decoded.grid[i], CELL_HIT, `Cell ${i} should be HIT`);
-    }
-
-    console.log("🎉 GAME OVER! Ship sunk in 5 attacks!");
-    console.log("Grid state:", Array.from(decoded.grid));
   });
 });
