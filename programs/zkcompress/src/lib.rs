@@ -7,7 +7,10 @@ use light_sdk::{
     address::v2::derive_address,
     cpi::{v2::CpiAccounts, CpiSigner},
     derive_light_cpi_signer,
-    instruction::{PackedAddressTreeInfo, ValidityProof},
+    instruction::{
+        account_meta::CompressedAccountMeta, account_meta::CompressedAccountMetaBurn,
+        PackedAddressTreeInfo, ValidityProof,
+    },
     LightDiscriminator,
 };
 use light_sdk_types::ADDRESS_TREE_V2;
@@ -18,14 +21,14 @@ pub const LIGHT_CPI_SIGNER: CpiSigner =
     derive_light_cpi_signer!("4XoRG4B6A7iJ5Vppi2EDD127imWR14USu2CBuEPHXiKK");
 
 #[program]
-pub mod create {
+pub mod update {
 
     use super::*;
     use light_sdk::cpi::{
         v2::LightSystemProgramCpi, InvokeLightSystemProgram, LightCpiInstruction,
     };
 
-    /// Creates a new compressed account
+    /// Setup: Creates a compressed account
     pub fn create_account<'info>(
         ctx: Context<'_, '_, '_, 'info, GenericAnchorAccounts<'info>>,
         proof: ValidityProof,
@@ -77,6 +80,126 @@ pub mod create {
 
         Ok(())
     }
+
+    /// Updates an existing compressed account's message
+    pub fn update_account<'info>(
+        ctx: Context<'_, '_, '_, 'info, GenericAnchorAccounts<'info>>,
+        proof: ValidityProof,
+        current_account: MyCompressedAccount,
+        account_meta: CompressedAccountMeta,
+        new_message: String,
+    ) -> Result<()> {
+        let light_cpi_accounts = CpiAccounts::new(
+            ctx.accounts.signer.as_ref(),
+            ctx.remaining_accounts,
+            crate::LIGHT_CPI_SIGNER,
+        );
+
+        let mut my_compressed_account = LightAccount::<MyCompressedAccount>::new_mut(
+            &crate::ID,
+            &account_meta,
+            current_account,
+        )?;
+
+        my_compressed_account.message = new_message.clone();
+
+        msg!(
+            "Updated compressed account message to: {}",
+            my_compressed_account.message
+        );
+
+        LightSystemProgramCpi::new_cpi(LIGHT_CPI_SIGNER, proof)
+            .with_light_account(my_compressed_account)?
+            .invoke(light_cpi_accounts)?;
+
+        Ok(())
+    }
+
+    /// Close compressed account
+    pub fn close_account<'info>(
+        ctx: Context<'_, '_, '_, 'info, GenericAnchorAccounts<'info>>,
+        proof: ValidityProof,
+        account_meta: CompressedAccountMeta,
+        current_message: String,
+    ) -> Result<()> {
+        let light_cpi_accounts = CpiAccounts::new(
+            ctx.accounts.signer.as_ref(),
+            ctx.remaining_accounts,
+            crate::LIGHT_CPI_SIGNER,
+        );
+
+        let my_compressed_account = LightAccount::<MyCompressedAccount>::new_close(
+            &crate::ID,
+            &account_meta,
+            MyCompressedAccount {
+                owner: ctx.accounts.signer.key(),
+                message: current_message,
+            },
+        )?;
+
+        msg!("Close compressed account.");
+
+        LightSystemProgramCpi::new_cpi(LIGHT_CPI_SIGNER, proof)
+            .with_light_account(my_compressed_account)?
+            .invoke(light_cpi_accounts)?;
+
+        Ok(())
+    }
+
+    /// Reinitialize closed compressed account
+    pub fn reinit_account<'info>(
+        ctx: Context<'_, '_, '_, 'info, GenericAnchorAccounts<'info>>,
+        proof: ValidityProof,
+        account_meta: CompressedAccountMeta,
+    ) -> Result<()> {
+        let light_cpi_accounts = CpiAccounts::new(
+            ctx.accounts.signer.as_ref(),
+            ctx.remaining_accounts,
+            crate::LIGHT_CPI_SIGNER,
+        );
+
+        let my_compressed_account =
+            LightAccount::<MyCompressedAccount>::new_empty(&crate::ID, &account_meta)?;
+
+        msg!("Reinitializing closed compressed account");
+
+        LightSystemProgramCpi::new_cpi(LIGHT_CPI_SIGNER, proof)
+            .with_light_account(my_compressed_account)?
+            .invoke(light_cpi_accounts)?;
+
+        Ok(())
+    }
+
+    /// Burns a compressed account permanently
+    pub fn burn_account<'info>(
+        ctx: Context<'_, '_, '_, 'info, GenericAnchorAccounts<'info>>,
+        proof: ValidityProof,
+        account_meta: CompressedAccountMetaBurn,
+        current_message: String,
+    ) -> Result<()> {
+        let light_cpi_accounts = CpiAccounts::new(
+            ctx.accounts.signer.as_ref(),
+            ctx.remaining_accounts,
+            crate::LIGHT_CPI_SIGNER,
+        );
+
+        let my_compressed_account = LightAccount::<MyCompressedAccount>::new_burn(
+            &crate::ID,
+            &account_meta,
+            MyCompressedAccount {
+                owner: ctx.accounts.signer.key(),
+                message: current_message,
+            },
+        )?;
+
+        msg!("Burning compressed account permanently");
+
+        LightSystemProgramCpi::new_cpi(LIGHT_CPI_SIGNER, proof)
+            .with_light_account(my_compressed_account)?
+            .invoke(light_cpi_accounts)?;
+
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -85,7 +208,6 @@ pub struct GenericAnchorAccounts<'info> {
     pub signer: Signer<'info>,
 }
 
-// declared as event so that it is part of the idl.
 #[event]
 #[derive(Clone, Debug, Default, LightDiscriminator)]
 pub struct MyCompressedAccount {
