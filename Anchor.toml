@@ -7,6 +7,7 @@ skip-lint = false
 
 [programs.localnet]
 zkcompress = "4XoRG4B6A7iJ5Vppi2EDD127imWR14USu2CBuEPHXiKK"
+battleship = "3gogNiRRhYTAT5UJUh4QCQ7XksCgrRr8dhGGMqjM3HLp"
 
 [registry]
 url = "https://api.apr.dev"

@@ -1,0 +1,16 @@
+
+⠧ Performing setup tasks...
+
+Starting test validator...
+8899 is up!
+Waiting for fees to stabilize 1...
+Server has passed stability checks.
+RPC is ready after 1 attempt.
+Warning: 1 processes still running after kill attempt
+Starting indexer...
+8784 is up!
+Indexer started successfully!
+3001 is up!
+Prover started successfully!
+
+Setup tasks completed successfully [32m✔[0m
