@@ -69,19 +69,20 @@
     bn.js "^5.1.2"
     buffer-layout "^1.2.0"
 
-"@lightprotocol/compressed-token@^0.22.1-alpha.2":
-  version "0.22.1-alpha.2"
-  resolved "https://registry.npmjs.org/@lightprotocol/compressed-token/-/compressed-token-0.22.1-alpha.2.tgz"
-  integrity sha512-QyZf3wssbZrDt8MVnKSmwGs2xJUUxUKYf6MblF0s8Jarl5T2GX/ZLnWJ8aiV1fjuMLu7m8AQb7lSKvn4YmTWMQ==
+"@lightprotocol/compressed-token@0.22.1-alpha.8":
+  version "0.22.1-alpha.8"
+  resolved "https://registry.npmjs.org/@lightprotocol/compressed-token/-/compressed-token-0.22.1-alpha.8.tgz"
+  integrity sha512-//61fslf34VXmJWavSRxGhYsOChWowG7DPCqtX+z1tvQg010v1MRTc2rN14HypfLHSy5ma8Ha1PImb3R4S4p+A==
   dependencies:
-    "@coral-xyz/borsh" "^0.29.0"
+    "@solana/buffer-layout" "^4.0.1"
+    "@solana/buffer-layout-utils" "^0.2.0"
     bn.js "^5.2.1"
     buffer "6.0.3"
 
-"@lightprotocol/stateless.js@0.22.1-alpha.1":
-  version "0.22.1-alpha.1"
-  resolved "https://registry.npmjs.org/@lightprotocol/stateless.js/-/stateless.js-0.22.1-alpha.1.tgz"
-  integrity sha512-r0AyafXHKVrTByp4tXJrg10b6NM/yubPgr1wcfhkbZ7R7DjLZRhiX/CnVAyKhtJyYByuVwiyqEFd/6wupxxVpA==
+"@lightprotocol/stateless.js@0.22.1-alpha.7":
+  version "0.22.1-alpha.7"
+  resolved "https://registry.npmjs.org/@lightprotocol/stateless.js/-/stateless.js-0.22.1-alpha.7.tgz"
+  integrity sha512-U4RgLGcpaPojiNcOWCSRm/pK5O2fyU80W1E+PPGR8DPlEA4h0CelLsxJm/d1wNDZiXSpibZ5pBxeuHBUjSKRYg==
   dependencies:
     "@coral-xyz/borsh" "^0.29.0"
     "@noble/hashes" "1.5.0"

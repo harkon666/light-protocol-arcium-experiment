@@ -1,6 +1,7 @@
 import { Link, Outlet, createRootRoute } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
+import { WalletButton } from '../components/WalletButton'
 
 export const Route = createRootRoute({
   component: () => (
@@ -11,21 +12,31 @@ export const Route = createRootRoute({
           <Link to="/" className="text-xl font-bold text-white flex items-center gap-2">
             🚢 ZK Battleship
           </Link>
-          <div className="flex gap-4">
-            <Link
-              to="/"
-              className="text-gray-300 hover:text-white transition"
-              activeProps={{ className: 'text-purple-400' }}
-            >
-              Home
-            </Link>
-            <Link
-              to="/zk-demo"
-              className="text-gray-300 hover:text-white transition"
-              activeProps={{ className: 'text-purple-400' }}
-            >
-              🔐 ZK Demo
-            </Link>
+          <div className="flex items-center gap-6">
+            <div className="flex gap-4">
+              <Link
+                to="/"
+                className="text-gray-300 hover:text-white transition"
+                activeProps={{ className: 'text-purple-400' }}
+              >
+                Home
+              </Link>
+              <Link
+                to="/zk-demo"
+                className="text-gray-300 hover:text-white transition"
+                activeProps={{ className: 'text-purple-400' }}
+              >
+                🔐 ZK Demo
+              </Link>
+              <Link
+                to="/game"
+                className="text-gray-300 hover:text-white transition"
+                activeProps={{ className: 'text-purple-400' }}
+              >
+                🎮 Play Game
+              </Link>
+            </div>
+            <WalletButton />
           </div>
         </div>
       </nav>

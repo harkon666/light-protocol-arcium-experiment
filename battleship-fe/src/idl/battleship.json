@@ -1,0 +1,470 @@
+{
+  "address": "3gogNiRRhYTAT5UJUh4QCQ7XksCgrRr8dhGGMqjM3HLp",
+  "metadata": {
+    "name": "battleship",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "On-chain Battleship Game with Light Protocol"
+  },
+  "instructions": [
+    {
+      "name": "attack",
+      "docs": [
+        "Attack a cell at (x, y) coordinates"
+      ],
+      "discriminator": [
+        197,
+        26,
+        63,
+        242,
+        77,
+        247,
+        101,
+        119
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "proof",
+          "type": {
+            "defined": {
+              "name": "ValidityProof"
+            }
+          }
+        },
+        {
+          "name": "current_game",
+          "type": {
+            "defined": {
+              "name": "GameState"
+            }
+          }
+        },
+        {
+          "name": "account_meta",
+          "type": {
+            "defined": {
+              "name": "CompressedAccountMeta"
+            }
+          }
+        },
+        {
+          "name": "attack_x",
+          "type": "u8"
+        },
+        {
+          "name": "attack_y",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "create_game",
+      "docs": [
+        "Creates a new game with ship placement",
+        "ship_start_x, ship_start_y: Starting coordinates (0-4)",
+        "is_horizontal: true = horizontal placement, false = vertical"
+      ],
+      "discriminator": [
+        124,
+        69,
+        75,
+        66,
+        184,
+        220,
+        72,
+        206
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "proof",
+          "type": {
+            "defined": {
+              "name": "ValidityProof"
+            }
+          }
+        },
+        {
+          "name": "address_tree_info",
+          "type": {
+            "defined": {
+              "name": "PackedAddressTreeInfo"
+            }
+          }
+        },
+        {
+          "name": "output_state_tree_index",
+          "type": "u8"
+        },
+        {
+          "name": "game_id",
+          "type": "u64"
+        },
+        {
+          "name": "ship_start_x",
+          "type": "u8"
+        },
+        {
+          "name": "ship_start_y",
+          "type": "u8"
+        },
+        {
+          "name": "is_horizontal",
+          "type": "bool"
+        },
+        {
+          "name": "board_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "join_game",
+      "docs": [
+        "Join an existing game as Player B",
+        "ship_start_x, ship_start_y: Starting coordinates (0-4)",
+        "is_horizontal: true = horizontal placement, false = vertical"
+      ],
+      "discriminator": [
+        107,
+        112,
+        18,
+        38,
+        56,
+        173,
+        60,
+        128
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "proof",
+          "type": {
+            "defined": {
+              "name": "ValidityProof"
+            }
+          }
+        },
+        {
+          "name": "current_game",
+          "type": {
+            "defined": {
+              "name": "GameState"
+            }
+          }
+        },
+        {
+          "name": "account_meta",
+          "type": {
+            "defined": {
+              "name": "CompressedAccountMeta"
+            }
+          }
+        },
+        {
+          "name": "ship_start_x",
+          "type": "u8"
+        },
+        {
+          "name": "ship_start_y",
+          "type": "u8"
+        },
+        {
+          "name": "is_horizontal",
+          "type": "bool"
+        },
+        {
+          "name": "board_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "GameState",
+      "discriminator": [
+        11,
+        157,
+        200,
+        169,
+        146,
+        6,
+        6,
+        10
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidPosition",
+      "msg": "Invalid position: coordinates out of bounds"
+    },
+    {
+      "code": 6001,
+      "name": "ShipOutOfBounds",
+      "msg": "Ship placement out of bounds"
+    },
+    {
+      "code": 6002,
+      "name": "AlreadyAttacked",
+      "msg": "Cell already attacked"
+    },
+    {
+      "code": 6003,
+      "name": "GameOver",
+      "msg": "Game is already over"
+    },
+    {
+      "code": 6004,
+      "name": "NotPlayerTurn",
+      "msg": "Not player's turn"
+    }
+  ],
+  "types": [
+    {
+      "name": "CompressedAccountMeta",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "tree_info",
+            "docs": [
+              "Merkle tree context."
+            ],
+            "type": {
+              "defined": {
+                "name": "PackedStateTreeInfo"
+              }
+            }
+          },
+          {
+            "name": "address",
+            "docs": [
+              "Address."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "output_state_tree_index",
+            "docs": [
+              "Output merkle tree index."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CompressedProof",
+      "repr": {
+        "kind": "c"
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "a",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "b",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          },
+          {
+            "name": "c",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameState",
+      "docs": [
+        "The game state stored as a compressed account"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_id",
+            "type": "u64"
+          },
+          {
+            "name": "player_a",
+            "type": "pubkey"
+          },
+          {
+            "name": "player_b",
+            "type": "pubkey"
+          },
+          {
+            "name": "current_turn",
+            "type": "u8"
+          },
+          {
+            "name": "game_status",
+            "type": "u8"
+          },
+          {
+            "name": "grid_a",
+            "type": {
+              "array": [
+                "u8",
+                25
+              ]
+            }
+          },
+          {
+            "name": "board_hash_a",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "hits_a",
+            "type": "u8"
+          },
+          {
+            "name": "grid_b",
+            "type": {
+              "array": [
+                "u8",
+                25
+              ]
+            }
+          },
+          {
+            "name": "board_hash_b",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "hits_b",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PackedAddressTreeInfo",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "address_merkle_tree_pubkey_index",
+            "type": "u8"
+          },
+          {
+            "name": "address_queue_pubkey_index",
+            "type": "u8"
+          },
+          {
+            "name": "root_index",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PackedStateTreeInfo",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "root_index",
+            "type": "u16"
+          },
+          {
+            "name": "prove_by_index",
+            "type": "bool"
+          },
+          {
+            "name": "merkle_tree_pubkey_index",
+            "type": "u8"
+          },
+          {
+            "name": "queue_pubkey_index",
+            "type": "u8"
+          },
+          {
+            "name": "leaf_index",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ValidityProof",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "option": {
+              "defined": {
+                "name": "CompressedProof"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
