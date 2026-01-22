@@ -1,6 +1,6 @@
 
 import { BN, Program, AnchorProvider } from "@coral-xyz/anchor";
-import { Connection, ComputeBudgetProgram, PublicKey, Transaction } from "@solana/web3.js";
+import { Connection, ComputeBudgetProgram, PublicKey } from "@solana/web3.js";
 import {
   createRpc,
   deriveAddressSeedV2,

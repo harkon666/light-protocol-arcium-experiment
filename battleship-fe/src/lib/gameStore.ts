@@ -97,7 +97,6 @@ export const useGameStore = create<GameState>((set, get) => ({
   setSalt: (salt) => set({ salt }),
 
   placeShip: () => {
-    const { shipX, shipY, orientation } = get();
     set({ isShipPlaced: true });
   },
 
@@ -132,7 +131,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
 
   attack: (x, y, isHit) => {
-    const { currentTurn, gridA, gridB, playerRole } = get();
+    const { currentTurn, gridA, gridB } = get();
     const targetGrid = currentTurn === 1 ? [...gridB] : [...gridA];
     const idx = y * 5 + x;
 

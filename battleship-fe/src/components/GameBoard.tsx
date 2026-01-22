@@ -17,8 +17,6 @@ export function GameBoard({
 }: GameBoardProps) {
 
   const getCellStyle = (value: number, index: number) => {
-    const x = index % 5;
-    const y = Math.floor(index / 5);
 
     // Ship preview
     if (shipPreview) {
