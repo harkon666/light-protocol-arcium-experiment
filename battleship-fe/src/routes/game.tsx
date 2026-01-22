@@ -5,7 +5,8 @@ import { ShipPlacer } from '../components/ShipPlacer'
 import { GameBoard } from '../components/GameBoard'
 import { useGameStore, GAME_STATUS, CELL_EMPTY, CELL_SHIP } from '../lib/gameStore'
 import { generateBoardHash, generateRandomSalt } from '../lib/noir'
-import { createOnlineGameTx, getConnection } from '../lib/multiplayer'
+import { createOnlineGameTx, joinOnlineGameTx, attackTx, getConnection } from '../lib/multiplayer'
+import { useGamePolling, ONLINE_GAME_STATUS } from '../lib/useGamePolling'
 import { WalletButton } from '../components/WalletButton'
 
 export const Route = createFileRoute('/game')({
@@ -21,6 +22,96 @@ function GamePage() {
   const [lastAiMove, setLastAiMove] = useState<{ x: number, y: number, hit: boolean } | null>(null);
   const [gameMode, setGameMode] = useState<'ai' | 'online'>('ai');
   const [joinGameId, setJoinGameId] = useState('');
+
+  // Poll game state whenever we are in an online game with an ID
+  const isOnlineGame = gameMode === 'online' && store.gameId !== null;
+
+  const { gameState: onlineGameState } = useGamePolling(
+    store.gameId,
+    isOnlineGame,
+    3000 // Poll every 3 seconds
+  );
+
+  // Sync online state to local store
+  useEffect(() => {
+    if (!onlineGameState) return;
+
+    console.log("Polling Update:", {
+      status: onlineGameState.gameStatus,
+      turn: onlineGameState.currentTurn,
+      playerB: onlineGameState.playerB?.toBase58()
+    });
+
+    // 1. Update Game Status
+    let newStatus = onlineGameState.gameStatus === ONLINE_GAME_STATUS.WAITING ? GAME_STATUS.WAITING :
+      onlineGameState.gameStatus === ONLINE_GAME_STATUS.ACTIVE ? GAME_STATUS.ACTIVE : GAME_STATUS.FINISHED;
+
+    // Determine winner based on gameStatus (2=A Won, 3=B Won)
+    let newWinner: 'A' | 'B' | null = null;
+    if (onlineGameState.gameStatus === 2) newWinner = 'A';
+    if (onlineGameState.gameStatus === 3) newWinner = 'B';
+
+    // PREVENT REVERSION: If local is ACTIVE, ignore WAITING from polling (indexer lag)
+    if (store.gameStatus === GAME_STATUS.ACTIVE && newStatus === GAME_STATUS.WAITING) {
+      console.log("Ignoring stale WAITING status from polling (local is ACTIVE)");
+      newStatus = GAME_STATUS.ACTIVE;
+    }
+
+    // 2. Update Turn (Contract: 1=PlayerA, 2=PlayerB -> Store: Same)
+    // Contract uses 1-based indexing for turns as well
+    const newTurn = onlineGameState.currentTurn;
+
+    // 3. Update Grids & Hashes
+    let newGridA = store.gridA;
+    let newGridB = store.gridB;
+
+    // Helper to convert byte array to hex string
+    const toHex = (arr: number[]) => arr ? Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('') : null;
+
+    const newBoardHashA = toHex(onlineGameState.boardHashA);
+    const newBoardHashB = toHex(onlineGameState.boardHashB);
+
+    if (store.playerRole === 'A') {
+      newGridA = onlineGameState.gridA; // My board
+      newGridB = onlineGameState.gridB; // Opponent board
+    } else if (store.playerRole === 'B') {
+      newGridA = onlineGameState.gridB; // My board (Player B content)
+      newGridB = onlineGameState.gridA; // Opponent board (Player A content)
+    }
+
+    // Only update if something changed (or if it's the first sync/active transition or HASH is missing)
+    if (store.gameStatus !== newStatus || store.currentTurn !== newTurn || !store.boardHashB || store.winner !== newWinner) {
+      console.log("Syncing online state (status/turn/hash/winner changed)...");
+      useGameStore.setState({
+        gameStatus: newStatus,
+        currentTurn: newTurn,
+        gridA: newGridA,
+        gridB: newGridB,
+        playerB: onlineGameState.playerB ? onlineGameState.playerB.toBase58() : store.playerB,
+        boardHashA: newBoardHashA,
+        boardHashB: newBoardHashB,
+        winner: newWinner,
+      });
+    } else {
+      // Just sync grids
+      // We'll compare JSON stringified to avoid loop, or just set it (zustand shallow compares?)
+      // To be safe, just set it, React will handle diff.
+      // Actually, preventing loop is good.
+      const gridsChanged = JSON.stringify(newGridA) !== JSON.stringify(store.gridA) ||
+        JSON.stringify(newGridB) !== JSON.stringify(store.gridB);
+
+      if (gridsChanged) {
+        useGameStore.setState({
+          gridA: newGridA,
+          gridB: newGridB,
+          boardHashA: newBoardHashA,
+          boardHashB: newBoardHashB,
+          winner: newWinner,
+        });
+      }
+    }
+  }, [onlineGameState, store.playerRole, store.gameStatus, store.currentTurn, store.winner]);
+
 
   // AI opponent logic
   useEffect(() => {
@@ -156,16 +247,158 @@ function GamePage() {
     });
   };
 
-  const handleAttack = (x: number, y: number) => {
-    if (aiThinking && gameMode === 'ai') return; // Prevent attack while AI is thinking
+  const handleAttack = async (x: number, y: number) => {
+    // 1. AI Logic
+    if (gameMode === 'ai') {
+      if (aiThinking) return; // Prevent attack while AI is thinking
 
-    // Determine if hit by checking opponent's grid
-    const targetGrid = store.gridB; // Player A always attacks B
-    const idx = y * 5 + x;
-    const isHit = targetGrid[idx] === CELL_SHIP;
+      // Determine if hit by checking opponent's grid
+      const targetGrid = store.gridB; // Player A always attacks B
+      const idx = y * 5 + x;
+      const isHit = targetGrid[idx] === CELL_SHIP;
 
-    store.attack(x, y, isHit);
-    setLastAiMove(null);
+      store.attack(x, y, isHit);
+      setLastAiMove(null);
+      return;
+    }
+
+    // 2. Online Logic
+    if (gameMode === 'online') {
+      // Basic checks
+      if (store.gameStatus !== GAME_STATUS.ACTIVE) return;
+      if (!store.gameId) return;
+
+      // Verify turn locally (optional, blockchain checks too)
+      const myTurn = (store.playerRole === 'A' && store.currentTurn === 1) ||
+        (store.playerRole === 'B' && store.currentTurn === 2);
+
+      if (!myTurn) {
+        console.log("Not your turn!");
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError('');
+        const connection = getConnection();
+        console.log(`Attacking (${x}, ${y}) in game ${store.gameId}...`);
+
+        const tx = await attackTx({
+          connection,
+          wallet: wallet as any,
+          gameId: store.gameId,
+          x,
+          y
+        });
+
+        // Simulate transaction first to get detailed error
+        console.log("Simulating attack transaction...");
+        try {
+          const simulation = await connection.simulateTransaction(tx);
+          console.log("Simulation result:", simulation);
+          if (simulation.value.err) {
+            console.error("Simulation error:", simulation.value.err);
+            console.error("Simulation logs:", simulation.value.logs);
+            throw new Error(`Attack simulation failed: ${JSON.stringify(simulation.value.err)}\n\nLogs:\n${simulation.value.logs?.join('\n')}`);
+          }
+        } catch (simErr) {
+          console.error("Simulation exception:", simErr);
+          throw simErr;
+        }
+
+        const signature = await wallet.sendTransaction(tx, connection);
+        console.log("Attack Tx:", signature);
+
+        await connection.confirmTransaction(signature, 'confirmed');
+        console.log("Attack confirmed!");
+
+        // We rely on polling to update the board state
+      } catch (e: any) {
+        console.error("Attack failed:", e);
+        setError("Attack failed: " + (e.message || e.toString()));
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleJoinGame = async () => {
+    if (!joinGameId.trim()) {
+      setError('Please enter a Game ID to join');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      if (!wallet.publicKey || !wallet.signTransaction) {
+        throw new Error("Please connect your wallet first!");
+      }
+
+      // Generate random salt
+      const salt = generateRandomSalt();
+      store.setSalt(salt);
+
+      // Generate ZK hash for player B's board
+      const hash = await generateBoardHash(
+        store.shipX,
+        store.shipY,
+        store.orientation === 'horizontal' ? 0 : 1,
+        salt
+      );
+
+      const connection = getConnection();
+
+      console.log("Joining game:", joinGameId);
+      const tx = await joinOnlineGameTx({
+        connection,
+        wallet: wallet as any,
+        gameId: joinGameId,
+        shipX: store.shipX,
+        shipY: store.shipY,
+        orientation: store.orientation === 'horizontal' ? 0 : 1,
+        boardHash: hash
+      });
+
+      // Simulate transaction first to get detailed error
+      console.log("Simulating join transaction...");
+      try {
+        const simulation = await connection.simulateTransaction(tx);
+        console.log("Simulation result:", simulation);
+        if (simulation.value.err) {
+          console.error("Simulation error:", simulation.value.err);
+          console.error("Simulation logs:", simulation.value.logs);
+          throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.value.err)}\n\nLogs:\n${simulation.value.logs?.join('\n')}`);
+        }
+      } catch (simErr) {
+        console.error("Simulation exception:", simErr);
+        throw simErr;
+      }
+
+      console.log("Sending join transaction...");
+      const signature = await wallet.sendTransaction(tx, connection);
+      console.log("Tx Signature:", signature);
+
+      await connection.confirmTransaction(signature, 'confirmed');
+      console.log("Join transaction confirmed!");
+
+      // Set up local state/board for player B using the proper action
+      console.log("Initializing Player B state...");
+      store.joinGame(hash, wallet.publicKey.toString());
+      store.setGameId(joinGameId);
+
+      // Ensure specific fields are set if joinGame didn't cover them (redundancy check)
+      useGameStore.setState({
+        currentTurn: 1 // Player A goes first
+      });
+
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : 'Failed to join game');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Custom Loading Screen
@@ -227,6 +460,34 @@ function GamePage() {
               )}
 
               <ShipPlacer onConfirm={handleCreateGame} />
+
+              {/* Join Existing Game - Online mode only */}
+              {gameMode === 'online' && wallet.connected && (
+                <div className="mt-6 pt-6 border-t border-slate-600">
+                  <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+                    <span>🔗</span> Or Join Existing Game
+                  </h3>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={joinGameId}
+                      onChange={(e) => setJoinGameId(e.target.value)}
+                      placeholder="Enter Game ID..."
+                      className="flex-1 px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
+                    />
+                    <button
+                      onClick={handleJoinGame}
+                      disabled={!joinGameId.trim()}
+                      className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition"
+                    >
+                      Join
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    Get the Game ID from Player A to join their game
+                  </p>
+                </div>
+              )}
 
               {/* Show error */}
               {error && (
@@ -301,7 +562,10 @@ function GamePage() {
 
   // Active game - show both boards
   if (store.gameStatus === GAME_STATUS.ACTIVE) {
-    const isMyTurn = store.currentTurn === 1; // Player A is always human
+    // Determine if it's my turn based on Role and CurrentTurn
+    // Turn 1 = Player A, Turn 2 = Player B
+    const isMyTurn = (store.playerRole === 'A' && store.currentTurn === 1) ||
+      (store.playerRole === 'B' && store.currentTurn === 2);
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-8">
@@ -359,7 +623,13 @@ function GamePage() {
           {/* Game Info */}
           <div className="mt-6 text-center text-gray-400">
             <p>Game ID: <span className="font-mono text-blue-400">{store.gameId}</span></p>
-            <p className="text-sm mt-1">Enemy Hash: <span className="font-mono text-purple-400">{store.boardHashB?.substring(0, 20)}...</span></p>
+            <p className="text-sm mt-1">Enemy Hash: <span className="font-mono text-purple-400">
+              {(store.playerRole === 'A' ? store.boardHashB : store.boardHashA)?.substring(0, 20) || "Waiting..."}...
+            </span></p>
+            <p className="text-xs text-slate-600 mt-2">
+              Status: {store.gameStatus === GAME_STATUS.ACTIVE ? "Active" : "Waiting"} |
+              Turn: {store.currentTurn === 1 ? "A" : "B"}
+            </p>
           </div>
         </div>
       </div>
@@ -368,7 +638,8 @@ function GamePage() {
 
   // Game finished
   if (store.gameStatus === GAME_STATUS.FINISHED) {
-    const didWin = store.winner === 'A'; // Human is always player A
+    // Check if I won (compare my role with the winner)
+    const didWin = store.winner === store.playerRole;
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-8 flex items-center justify-center">
@@ -381,7 +652,10 @@ function GamePage() {
             {didWin ? 'You destroyed the fleet!' : 'Your fleet was destroyed!'}
           </p>
           <button
-            onClick={() => store.reset()}
+            onClick={() => {
+              store.reset();
+              window.location.reload(); // Refresh to ensure clean state
+            }}
             className="bg-purple-600 hover:bg-purple-700 text-white px-8 py-3 rounded-xl font-semibold"
           >
             🔄 Play Again
